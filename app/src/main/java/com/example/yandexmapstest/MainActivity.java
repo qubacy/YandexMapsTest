@@ -17,11 +17,14 @@ import com.google.android.gms.location.Priority;
 import com.google.android.gms.tasks.CancellationTokenSource;
 import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
+import com.google.android.material.slider.Slider;
 import com.yandex.mapkit.Animation;
 import com.yandex.mapkit.MapKitFactory;
 import com.yandex.mapkit.geometry.Circle;
+import com.yandex.mapkit.geometry.Geometry;
 import com.yandex.mapkit.geometry.Point;
 import com.yandex.mapkit.map.CameraPosition;
+import com.yandex.mapkit.map.CircleMapObject;
 import com.yandex.mapkit.map.Map;
 import com.yandex.mapkit.mapview.MapView;
 
@@ -29,13 +32,18 @@ public class MainActivity extends AppCompatActivity {
     private final int C_FINE_LOCATION_PERMISSION_REQUEST_CODE = 0;
     private final int C_COARSE_LOCATION_PERMISSION_REQUEST_CODE = 1;
 
-    private final float C_LOCATION_CIRCLE_RADIUS = 400f;
     private final float C_LOCATION_CIRCLE_STROKE_WIDTH = 2f;
+    private final float C_VIEW_CIRCLE_MULTIPLIER = 1.2f;
+    private final float C_CAMERA_MOVEMENT_ANIMATION_DURATION = 1;
 
     private MapView m_mapView = null;
+    private Slider m_radiusSlider = null;
 
     private FusedLocationProviderClient m_fusedLocationProviderClient = null;
     private CancellationTokenSource m_cancellationTokenSource = null;
+
+    private Point m_locationPoint = null;
+    private CircleMapObject m_curLocationCircle = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -46,6 +54,14 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         m_mapView = findViewById(R.id.map);
+        m_radiusSlider = findViewById(R.id.location_radius);
+
+        m_radiusSlider.addOnChangeListener(new Slider.OnChangeListener() {
+            @Override
+            public void onValueChange(@NonNull Slider slider, float value, boolean fromUser) {
+                onLocationRadiusChanged(value);
+            }
+        });
 
         processAvailability();
     }
@@ -183,7 +199,9 @@ public class MainActivity extends AppCompatActivity {
 
                     Log.d("TEST", locationStringBuilder.toString());
 
-                    designateMapLocation(location);
+                    m_locationPoint = new Point(location.getLatitude(), location.getLongitude());
+
+                    initMapLocation();
 
                 } else {
                     Log.d(getClass().getName(), "Exception: " + task.getException().getMessage());
@@ -194,23 +212,56 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    private void designateMapLocation(final Location location) {
-        Point locationPoint = new Point(location.getLatitude(), location.getLongitude());
-        Map map = m_mapView.getMap();
+    private void initMapLocation() {
+        onLocationRadiusChanged(getResources().getInteger(R.integer.min_location_radius));
+    }
+
+    private void drawCurLocationCircle(
+            final Map map,
+            final float radius)
+    {
+        if (map == null || radius <= 0) return;
+
+        Circle locationCircle = new Circle(m_locationPoint, radius);
+
+        if (m_curLocationCircle != null)
+            map.getMapObjects().remove(m_curLocationCircle);
+
+        m_curLocationCircle =
+                map.getMapObjects().addCircle(
+                        locationCircle,
+                        ContextCompat.getColor(this, R.color.red),
+                        C_LOCATION_CIRCLE_STROKE_WIDTH,
+                        ContextCompat.getColor(this, R.color.red_alpha));
+    }
+
+    private void changeCameraPosition(
+            final Map map,
+            final Point locationPoint,
+            final float radius)
+    {
+        if (map == null || locationPoint == null || radius <= 0) return;
+
+        Circle viewCircle =
+                new Circle(
+                        m_curLocationCircle.getGeometry().getCenter(),
+                        m_curLocationCircle.getGeometry().getRadius() * C_VIEW_CIRCLE_MULTIPLIER);
+
+        CameraPosition cameraPosition =
+                map.cameraPosition(
+                        Geometry.fromCircle(viewCircle), null, null, null);
 
         map.
-            move(new CameraPosition(
-                        locationPoint,
-                        14.0f, 0.0f, 0.0f),
-                new Animation(Animation.Type.SMOOTH, 5),
-                null);
+                move(cameraPosition,
+                        new Animation(
+                                Animation.Type.SMOOTH, C_CAMERA_MOVEMENT_ANIMATION_DURATION),
+                        null);
+    }
 
-        Circle locationWithRadius = new Circle(locationPoint, C_LOCATION_CIRCLE_RADIUS);
+    private void onLocationRadiusChanged(final float radius) {
+        Map map = m_mapView.getMap();
 
-        map.getMapObjects().addCircle(
-                locationWithRadius,
-                ContextCompat.getColor(this, R.color.red),
-                C_LOCATION_CIRCLE_STROKE_WIDTH,
-                ContextCompat.getColor(this, R.color.red_alpha));
+        drawCurLocationCircle(map, radius);
+        changeCameraPosition(map, m_locationPoint, radius);
     }
 }
